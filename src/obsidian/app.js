@@ -858,7 +858,6 @@ var obsidian = {
   stripHeading: () => stripHeading,
   stripHeadingForLink: () => stripHeadingForLink,
 };
-/** tslib */
 const { __awaiter, __generator, __values, __await, __asyncGenerator, __asyncValues } = require("tslib");
 const KeyboardStyle = {
   Dark: "DARK",
@@ -23402,33 +23401,25 @@ class $M extends XM {
       this.displayError(i18nProxy.plugins.fileExplorer.msgFileAlreadyExists(), !1);
     }
   }
-  submit(e) {
-    return __awaiter(this, undefined, Promise, function () {
-      var t, n, i, r, o, a;
-      return __generator(this, function (s) {
-        switch (s.label) {
-          case 0:
-            if ((this.close(), (n = (t = this).app), (i = t.file), e === "")) {
-              new Notice(i18nProxy.plugins.fileExplorer.msgEmptyFileName());
-              return [2];
-            }
-            if (((r = i.getNewPathAfterRename(e)), i.path === r)) return [2];
-            s.label = 1;
-          case 1:
-            s.trys.push([1, 3, , 4]);
-            return [4, n.fileManager.renameFile(i, r)];
-          case 2:
-            s.sent();
-            new Notice(i18nProxy.dialogue.msgRenameSuccess());
-            return [3, 4];
-          case 3:
-            (o = s.sent()) && ((a = o.message || o.code || o.toString()), new Notice(a));
-            return [3, 4];
-          case 4:
-            return [2];
-        }
-      });
-    });
+  async submit(e) {
+    this.close();
+    if (e === "") {
+      new Notice(i18nProxy.plugins.fileExplorer.msgEmptyFileName());
+      return;
+    }
+    const { app, file } = this;
+    const path = file.getNewPathAfterRename(e);
+    if (file.path === path) return;
+
+    try {
+      await app.fileManager.renameFile(file, path);
+      new Notice(i18nProxy.dialogue.msgRenameSuccess());
+    } catch (error) {
+      if (error) {
+        const message = error.message || error.code || error.toString();
+        new Notice(message);
+      }
+    }
   }
 }
 class JM extends XM {
@@ -23438,66 +23429,48 @@ class JM extends XM {
     this.editor = editor;
     this.tokenRange = tokenRange;
   }
-  submit(e) {
-    return __awaiter(this, undefined, undefined, function () {
-      var t, n, i, r, o, a, s, countl0, count, u, h, reference, links, files, m, g, v, y, w, k, C, E;
-      return __generator(this, function (b) {
-        switch (b.label) {
-          case 0:
-            return (t = this.getError(e))
-              ? (displayTooltip(this.inputEl, t, { placement: "bottom", classes: ["mod-error"] }), [2, !0])
-              : ((i = (n = this).file),
-                (r = n.app),
-                (o = r.fileManager),
-                (a = r.vault),
-                (s = this.getChanges(e)),
-                (countl0 = s.data.size),
-                (count = s.count()) !== 0 ? [3, 1] : (this.replaceInEditor(e), [3, 6]));
-          case 1:
-            return (u = s.get(i.path)) && u.length > 0
-              ? (s.clear(i.path),
-                (h = this.replaceInFile(e)),
-                (reference = {
-                  link: "",
-                  original: "",
-                  position: { start: { line: 0, col: 0, offset: h.start }, end: { line: 0, col: 0, offset: h.end } },
-                }),
-                u.push({ sourcePath: i.path, change: h.text, reference: reference }),
-                [
-                  4,
-                  a.process(i, function (e) {
-                    return bx(e, u);
-                  }),
-                ])
-              : [3, 3];
-          case 2:
-            b.sent();
-            return [3, 4];
-          case 3:
-            this.replaceInEditor(e);
-            b.label = 4;
-          case 4:
-            return [4, o.updateInternalLinks(s)];
-          case 5:
-            b.sent();
-            links = i18nProxy.nouns.linkWithCount({ count: count });
-            files = i18nProxy.nouns.fileWithCount({ count: countl0 });
-            m = i18nProxy.dialogue.msgUpdatedLinks({ links: links, files: files });
-            new Notice(m);
-            b.label = 6;
-          case 6:
-            for (g = o.linkUpdaters, v = 0, y = Object.values(g); v < y.length; v++) {
-              w = y[v];
-              k = this.getCustomReplacements(e);
-              C = k.oldSubpath;
-              E = k.newSubpath;
-              w.renameSubpath(this.file, C, E);
-            }
-            this.close();
-            return [2];
-        }
-      });
-    });
+  async submit(commit) {
+    const error = this.getError(commit);
+    if (error) {
+      displayTooltip(this.inputEl, error, { placement: "bottom", classes: ["mod-error"] });
+      return true;
+    }
+
+    const { file, app } = this;
+    const { fileManager, vault } = app;
+    const changes = this.getChanges(commit);
+    const size = changes.data.size;
+    const count = changes.count();
+
+    if (count === 0) {
+      this.replaceInEditor(commit);
+    } else {
+      const u = changes.get(file.path);
+      if (u && u.length > 0) {
+        changes.clear(file.path);
+        const h = this.replaceInFile(commit);
+        const reference = {
+          link: "",
+          original: "",
+          position: { start: { line: 0, col: 0, offset: h.start }, end: { line: 0, col: 0, offset: h.end } },
+        };
+        u.push({ sourcePath: file.path, change: h.text, reference });
+        await vault.process(file, (content) => bx(content, u));
+      } else {
+        this.replaceInEditor(commit);
+      }
+      await fileManager.updateInternalLinks(changes);
+      const links = i18nProxy.nouns.linkWithCount({ count });
+      const files = i18nProxy.nouns.fileWithCount({ count: size });
+      const message = i18nProxy.dialogue.msgUpdatedLinks({ links, files });
+      new Notice(message);
+    }
+
+    for (const link of Object.values(fileManager.linkUpdaters)) {
+      const { oldSubpath, newSubpath } = this.getCustomReplacements(commit);
+      link.renameSubpath(this.file, oldSubpath, newSubpath);
+    }
+    this.close();
   }
 }
 class ex extends JM {
@@ -23985,101 +23958,56 @@ class FileManager {
   canCreateFileWithExt(e) {
     return this.fileParentCreatorByType.hasOwnProperty(e || "md");
   }
-  createNewMarkdownFileFromLinktext(e, t) {
-    return __awaiter(this, undefined, Promise, function () {
-      var n;
-      return __generator(this, function (i) {
-        if (!$b(e)) throw new Error(i18nProxy.plugins.fileExplorer.msgInvalidCharacters() + Kb);
-        n = null;
-        e.contains("/") || (n = this.getNewFileParent(t, e));
-        return [2, this.createNewMarkdownFile(n, e)];
-      });
-    });
+  async createNewMarkdownFileFromLinktext(e, t) {
+    if (!$b(e)) throw new Error(i18nProxy.plugins.fileExplorer.msgInvalidCharacters() + Kb);
+    const n = e.contains("/") ? null : this.getNewFileParent(t, e);
+    return this.createNewMarkdownFile(n, e);
   }
-  createNewMarkdownFile(e, t, n) {
-    return __awaiter(this, undefined, Promise, function () {
-      return __generator(this, function (i) {
-        return [2, this.createNewFile(e, t, "md", n)];
-      });
-    });
+  async createNewMarkdownFile(e, t, n) {
+    return this.createNewFile(e, t, "md", n);
   }
-  createNewFile(e, t, n, i) {
-    return __awaiter(this, undefined, Promise, function () {
-      var r,
-        o,
-        a,
-        s,
-        l,
-        c,
-        u,
-        h = this;
-      return __generator(this, function (p) {
-        switch (p.label) {
-          case 0:
-            r = this.vault;
-            e || (e = r.getRoot());
-            n || (n = (t && getExtension(t)) || "md");
-            this.fileParentCreatorByType.hasOwnProperty(n) || (n = "md");
-            o = e.getParentPrefix();
-            t
-              ? (tu((t = t.trim()), n) && (t = $c(t)), (t = normalizePath(t)), (a = r.getAvailablePath(o + t, n)))
-              : ((s = i18nProxy.plugins.fileExplorer.labelUntitledFile()), (a = r.getAvailablePath(o + s, n)));
-            l = Zc(a);
-            c = getFilename(a);
-            return [
-              4,
-              __awaiter(h, undefined, undefined, function () {
-                var e;
-                return __generator(this, function (t) {
-                  return l && l !== "/"
-                    ? (e = r.getAbstractFileByPathInsensitive(l)) && e instanceof TFolder
-                      ? [2, e]
-                      : [2, r.createFolder(l)]
-                    : [2, r.getRoot()];
-                });
-              }),
-            ];
-          case 1:
-            u = p.sent();
-            return [2, r.create(u.getParentPrefix() + c, i || "")];
-        }
-      });
-    });
+  async createNewFile(path, name, extension, i) {
+    path = path || this.vault.getRoot();
+    extension = extension || (name && getExtension(name)) || "md";
+    if (!this.fileParentCreatorByType.hasOwnProperty(extension)) extension = "md";
+
+    const o = path.getParentPrefix();
+    let a;
+    if (name) {
+      name = name.trim();
+      if (tu(name, extension)) name = $c(name);
+      name = normalizePath(name);
+      a = this.vault.getAvailablePath(o + name, extension);
+    } else {
+      const s = i18nProxy.plugins.fileExplorer.labelUntitledFile();
+      a = this.vault.getAvailablePath(o + s, extension);
+    }
+
+    const l = Zc(a);
+    const filename = getFilename(a);
+
+    let u;
+    if (l && l !== "/") {
+      const folder = this.vault.getAbstractFileByPathInsensitive(l);
+      u = folder && folder instanceof TFolder ? folder : await this.vault.createFolder(l);
+    } else {
+      u = await this.vault.getRoot();
+    }
+
+    return this.vault.create(u.getParentPrefix() + filename, i || "");
   }
-  createNewFolder(e) {
-    return __awaiter(this, undefined, Promise, function () {
-      var t, n, i, r;
-      return __generator(this, function (o) {
-        switch (o.label) {
-          case 0:
-            t = !e || e.isRoot() ? "" : e.path + "/";
-            n = i18nProxy.plugins.fileExplorer.labelUntitledFolder();
-            i = this.vault.getAvailablePath(t + n);
-            return [4, this.vault.createFolder(i)];
-          case 1:
-            o.sent();
-            return (r = this.vault.getAbstractFileByPath(i)) && r instanceof TFolder ? [2, r] : [2, null];
-        }
-      });
-    });
+  async createNewFolder(e) {
+    var t, n, i, r;
+    t = !e || e.isRoot() ? "" : e.path + "/";
+    n = i18nProxy.plugins.fileExplorer.labelUntitledFolder();
+    i = this.vault.getAvailablePath(t + n);
+    await this.vault.createFolder(i);
+    r = this.vault.getAbstractFileByPath(i);
+    return r && r instanceof TFolder ? r : null;
   }
-  renameFile(e, t) {
-    return __awaiter(this, undefined, Promise, function () {
-      var n = this;
-      return __generator(this, function (i) {
-        switch (i.label) {
-          case 0:
-            return [
-              4,
-              this.runAsyncLinkUpdate(function () {
-                return n.vault.rename(e, t);
-              }),
-            ];
-          case 1:
-            i.sent();
-            return [2];
-        }
-      });
+  async renameFile(e, t) {
+    await this.runAsyncLinkUpdate(function () {
+      return this.vault.rename(e, t);
     });
   }
   iterateAllRefs(e) {
@@ -24088,214 +24016,127 @@ class FileManager {
       i[n].iterateReferences(e);
     }
   }
-  runAsyncLinkUpdate(e) {
-    return __awaiter(this, undefined, undefined, function () {
-      var t = this;
-      return __generator(this, function (n) {
-        return this.inProgressUpdates
-          ? (this.inProgressUpdates.push(e), [2])
-          : [
-              2,
-              this.updateQueue.queue(function () {
-                return __awaiter(t, undefined, undefined, function () {
-                  var t,
-                    n,
-                    i,
-                    r,
-                    o,
-                    a = this;
-                  return __generator(this, function (s) {
-                    switch (s.label) {
-                      case 0:
-                        return [
-                          4,
-                          new Promise(function (e) {
-                            return a.app.metadataCache.onCleanCache(e);
-                          }),
-                        ];
-                      case 1:
-                        s.sent();
-                        t = [];
-                        n = this.app;
-                        i = n.metadataCache;
-                        r = n.vault;
-                        this.iterateAllRefs(function (e, reference) {
-                          var o = getLinkpath(reference.link);
-                          if (o) {
-                            var sourceFile = r.getAbstractFileByPath(e);
-                            if (sourceFile instanceof TFile) {
-                              var s = i.getLinkpathDest(o, e);
-                              if (s.length > 0) {
-                                t.push({
-                                  sourceFile: sourceFile,
-                                  reference: reference,
-                                  resolvedFile: s[0],
-                                  resolvedPaths: s.map(function (e) {
-                                    return e.path;
-                                  }),
-                                });
-                              }
-                            }
-                          }
-                        });
-                        s.label = 2;
-                      case 2:
-                        s.trys.push([2, , 7, 8]);
-                        this.inProgressUpdates = [];
-                        return [4, e(t)];
-                      case 3:
-                        s.sent();
-                        s.label = 4;
-                      case 4:
-                        return this.inProgressUpdates.length > 0
-                          ? ((o = this.inProgressUpdates),
-                            (this.inProgressUpdates = []),
-                            [
-                              4,
-                              Promise.all(
-                                o.map(function (e) {
-                                  return e(t);
-                                }),
-                              ),
-                            ])
-                          : [3, 6];
-                      case 5:
-                        s.sent();
-                        return [3, 4];
-                      case 6:
-                        return [3, 8];
-                      case 7:
-                        this.inProgressUpdates = null;
-                        return [7];
-                      case 8:
-                        return [4, this.updateAllLinks(t)];
-                      case 9:
-                        s.sent();
-                        return [2];
-                    }
-                  });
-                });
-              }),
-            ];
+  async runAsyncLinkUpdate(e) {
+    if (this.inProgressUpdates) {
+      this.inProgressUpdates.push(e);
+      return;
+    }
+
+    const self = this;
+    await this.updateQueue.queue(async function () {
+      await new Promise((resolve) => self.app.metadataCache.onCleanCache(resolve));
+      const refs = [];
+      const { metadataCache, vault } = self.app;
+
+      self.iterateAllRefs(function (sourcePath, reference) {
+        const linkpath = getLinkpath(reference.link);
+        if (linkpath) {
+          const sourceFile = vault.getAbstractFileByPath(sourcePath);
+          if (sourceFile instanceof TFile) {
+            const s = metadataCache.getLinkpathDest(linkpath, sourcePath);
+            if (s.length > 0) {
+              refs.push({
+                sourceFile,
+                reference,
+                resolvedFile: s[0],
+                resolvedPaths: s.map((file) => file.path),
+              });
+            }
+          }
+        }
       });
+
+      try {
+        self.inProgressUpdates = [];
+        await e(refs);
+
+        while (self.inProgressUpdates.length > 0) {
+          const o = self.inProgressUpdates;
+          self.inProgressUpdates = [];
+          await Promise.all(o.map((updateFn) => updateFn(refs)));
+        }
+      } finally {
+        self.inProgressUpdates = null;
+      }
+
+      await self.updateAllLinks(refs);
     });
   }
-  updateAllLinks(e) {
-    return __awaiter(this, undefined, Promise, function () {
-      var t,
-        n,
-        i,
-        r,
-        o,
-        a,
-        count,
-        links,
-        files,
-        u,
-        h = this;
-      return __generator(this, function (p) {
-        for (t = new tc(), n = this.app.metadataCache, i = 0, r = e; i < r.length; i++) {
-          o = r[i];
-          (a = gx(o, n)) && t.add(a.sourcePath, a);
+  async updateAllLinks(e) {
+    const t = new tc();
+    const n = this.app.metadataCache;
+    for (const o of e) {
+      const a = gx(o, n);
+      if (a) t.add(a.sourcePath, a);
+    }
+
+    const count = t.count();
+    if (count === 0) return;
+
+    const links = i18nProxy.nouns.linkWithCount({ count });
+    const files = i18nProxy.nouns.fileWithCount({ count: t.data.size });
+    const h = this;
+
+    const u = async function () {
+      await h.updateInternalLinks(t);
+      new Notice(i18nProxy.dialogue.msgUpdatedLinks({ links, files }));
+    };
+
+    if (this.vault.getConfig("alwaysUpdateLinks")) {
+      await u();
+    } else {
+      await new Promise(function (resolve, reject) {
+        try {
+          const textn0 = i18nProxy.dialogue.labelLinkAffected({ links, files });
+          const modal = new GM(h.app);
+          modal.titleEl.setText(i18nProxy.dialogue.labelUpdateLinks());
+          modal.contentEl.createEl("p", { text: i18nProxy.dialogue.labelConfirmUpdateLinkToFile() });
+          modal.contentEl.createEl("p", { text: textn0 });
+          modal.setCloseCallback(resolve);
+
+          const handleAction = function (always) {
+            modal.setCloseCallback(null);
+            modal.close();
+            if (always) h.app.vault.setConfig("alwaysUpdateLinks", true);
+            resolve(u());
+          };
+
+          const o = modal.buttonContainerEl;
+          o.createEl("button", { text: i18nProxy.dialogue.buttonAlwaysUpdate() }).addEventListener("click", () =>
+            handleAction(true),
+          );
+          o.createEl("button", { text: i18nProxy.dialogue.buttonJustOnce() }).addEventListener("click", () =>
+            handleAction(),
+          );
+          o.createEl("button", { text: i18nProxy.dialogue.buttonDoNotUpdate() }).addEventListener("click", () =>
+            modal.close(),
+          );
+          modal.open();
+        } catch (err) {
+          reject(err);
         }
-        return (count = t.count()) === 0
-          ? [2]
-          : ((links = i18nProxy.nouns.linkWithCount({
-              count: count,
-            })),
-            (files = i18nProxy.nouns.fileWithCount({
-              count: t.data.size,
-            })),
-            (u = function () {
-              return __awaiter(h, undefined, undefined, function () {
-                return __generator(this, function (e) {
-                  switch (e.label) {
-                    case 0:
-                      return [4, this.updateInternalLinks(t)];
-                    case 1:
-                      e.sent();
-                      new Notice(
-                        i18nProxy.dialogue.msgUpdatedLinks({
-                          links: links,
-                          files: files,
-                        }),
-                      );
-                      return [2];
-                  }
-                });
-              });
-            }),
-            this.vault.getConfig("alwaysUpdateLinks")
-              ? [2, u()]
-              : [
-                  2,
-                  new Promise(function (e, t) {
-                    try {
-                      var textn0 = i18nProxy.dialogue.labelLinkAffected({
-                          links: links,
-                          files: files,
-                        }),
-                        i = new GM(h.app);
-                      i.titleEl.setText(i18nProxy.dialogue.labelUpdateLinks());
-                      i.contentEl.createEl("p", {
-                        text: i18nProxy.dialogue.labelConfirmUpdateLinkToFile(),
-                      });
-                      i.contentEl.createEl("p", {
-                        text: textn0,
-                      });
-                      i.setCloseCallback(e);
-                      var r = function (t) {
-                          i.setCloseCallback(null);
-                          i.close();
-                          t && h.app.vault.setConfig("alwaysUpdateLinks", !0);
-                          e(u());
-                        },
-                        o = i.buttonContainerEl;
-                      i.buttonContainerEl
-                        .createEl("button", {
-                          text: i18nProxy.dialogue.buttonAlwaysUpdate(),
-                        })
-                        .addEventListener("click", function () {
-                          return r(!0);
-                        });
-                      o.createEl("button", {
-                        text: i18nProxy.dialogue.buttonJustOnce(),
-                      }).addEventListener("click", function () {
-                        return r();
-                      });
-                      o.createEl("button", {
-                        text: i18nProxy.dialogue.buttonDoNotUpdate(),
-                      }).addEventListener("click", function () {
-                        return i.close();
-                      });
-                      i.open();
-                    } catch (e) {
-                      t(e);
-                    }
-                  }),
-                ]);
       });
-    });
+    }
   }
   renameProperty(e, t) {
     return __awaiter(this, undefined, undefined, function () {
-      var n, i, r, o, a, s, l, c, u, h;
+      var app, metadataCache, metadataTypeManager, widget, a, s, l, c, u, h;
       return __generator(this, function (p) {
         switch (p.label) {
           case 0:
-            n = this.app;
-            i = n.metadataCache;
-            (r = n.metadataTypeManager).assignedWidgets.hasOwnProperty(e) &&
-              ((o = r.assignedWidgets[e].widget), xM.hasOwnProperty(e) || r.unsetType(e), r.setType(t, o));
+            app = this.app;
+            metadataCache = app.metadataCache;
+            (metadataTypeManager = app.metadataTypeManager).assignedWidgets.hasOwnProperty(e) &&
+              ((widget = metadataTypeManager.assignedWidgets[e].widget), xM.hasOwnProperty(e) || metadataTypeManager.unsetType(e), metadataTypeManager.setType(t, widget));
             a = 0;
-            s = i.getCachedFiles();
+            s = metadataCache.getCachedFiles();
             p.label = 1;
           case 1:
             return a < s.length
               ? ((l = s[a]),
-                i.isUserIgnored(l)
+                metadataCache.isUserIgnored(l)
                   ? [3, 3]
-                  : (c = i.getCache(l)) &&
+                  : (c = metadataCache.getCache(l)) &&
                       (u = c.frontmatter) &&
                       u.hasOwnProperty(e) &&
                       (h = this.vault.getAbstractFileByPath(l)) &&
@@ -24517,27 +24358,14 @@ class FileManager {
       });
     });
   }
-  promptForFolderDeletion(e) {
-    return __awaiter(this, undefined, undefined, function () {
-      return __generator(this, function (t) {
-        return [2, this.promptForDeletion(e)];
-      });
-    });
+  async promptForFolderDeletion(e) {
+    return this.promptForDeletion(e);
   }
-  promptForFileDeletion(e) {
-    return __awaiter(this, undefined, undefined, function () {
-      return __generator(this, function (t) {
-        return [2, this.promptForDeletion(e)];
-      });
-    });
+  async promptForFileDeletion(e) {
+    return this.promptForDeletion(e);
   }
-  promptForFileRename(e) {
-    return __awaiter(this, undefined, undefined, function () {
-      return __generator(this, function (t) {
-        new $M(this.app, e).open();
-        return [2];
-      });
-    });
+  async promptForFileRename(e) {
+    new $M(this.app, e).open();
   }
   trashFile(e) {
     return __awaiter(this, undefined, undefined, function () {
@@ -28321,6 +28149,7 @@ class XT extends PopoverSuggest {
     n.style.top = "";
   }
   detachDom() {
+    const upper = super.detachDom;
     return __awaiter(this, undefined, undefined, function () {
       var t, n, i;
       return __generator(this, function (r) {
@@ -28337,7 +28166,7 @@ class XT extends PopoverSuggest {
             n.detach();
             return [3, 4];
           case 3:
-            super.detachDom.call(this);
+            upper.call(this);
             r.label = 4;
           case 4:
             return [2];
@@ -55429,6 +55258,7 @@ class FileView extends ItemView {
     }
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i,
         r,
@@ -55453,7 +55283,7 @@ class FileView extends ItemView {
           case 4:
             this.file || this.allowNoFile || (n.close = true);
             i && ((n.layout = true), (n.history = true));
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 5:
             a.sent();
             t.sync ||
@@ -57175,13 +57005,14 @@ class $j extends TextFileView {
     return t;
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i;
       return __generator(this, function (r) {
         switch (r.label) {
           case 0:
             i = t.viewName;
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             r.sent();
             i && (this.controller.selectView(i), this.leaf.updateHeader());
@@ -66442,13 +66273,14 @@ class yY extends IK {
     return e.replace(n, "$&" + t);
   }
   save(t) {
+    const upper = super.save;
     return __awaiter(this, arguments, undefined, function (t, n) {
       var lastSavedData, r, o, a, s, l, c, u, h, lastSavedDatap0, d;
       undefined === n && (n = false);
       return __generator(this, function (f) {
         switch (f.label) {
           case 0:
-            if ((super.save.call(this, t, n), this.subpathNotFound)) return [2];
+            if ((upper.call(this, t, n), this.subpathNotFound)) return [2];
             if (
               ((lastSavedData = t),
               (o = (r = this).before),
@@ -71530,13 +71362,14 @@ class rQ extends ItemView {
     return t;
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i, version;
       return __generator(this, function (o) {
         switch (o.label) {
           case 0:
             i = this.version;
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             o.sent();
             (version = t.currentVersion) && /^(\d+)\.(\d+)(\.\d+)?$/.test(version) && (this.version = version);
@@ -76528,6 +76361,7 @@ class DJ extends FileView {
     });
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i;
       return __generator(this, function (r) {
@@ -76536,7 +76370,7 @@ class DJ extends FileView {
             t.hasOwnProperty("group") ||
               this.leaf.pinned ||
               ((i = this.leaf.workspace.getActiveFile()) && (t.file = i == null ? undefined : i.path));
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             r.sent();
             return [2];
@@ -76824,9 +76658,7 @@ class FJ extends DJ {
     return n;
   }
   getDisplayText() {
-    return !this.file || Platform.isMobile
-      ? AJ.name()
-      : AJ.tabTitle({ displayText: super.getDisplayText.call(this) });
+    return !this.file || Platform.isMobile ? AJ.name() : AJ.tabTitle({ displayText: super.getDisplayText.call(this) });
   }
   getViewType() {
     return type;
@@ -76840,12 +76672,13 @@ class FJ extends DJ {
     return t;
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       return __generator(this, function (i) {
         switch (i.label) {
           case 0:
             t.options && this.engine.setOptions(t.options);
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             i.sent();
             return [2];
@@ -77500,11 +77333,12 @@ class VJ extends C_ {
     return this.toggleCollapsed(!0);
   }
   updateCollapsed(t) {
+    const upper = super.updateCollapsed;
     return __awaiter(this, undefined, Promise, function () {
       return __generator(this, function (n) {
         switch (n.label) {
           case 0:
-            return [4, super.updateCollapsed.call(this, t)];
+            return [4, upper.call(this, t)];
           case 1:
             n.sent();
             this.engine.onOptionsChange();
@@ -79721,12 +79555,13 @@ class StyleManager extends Component {
     return n;
   }
   onload() {
+    const upper = super.onload;
     return __awaiter(this, undefined, undefined, function () {
       var t;
       return __generator(this, function (n) {
         switch (n.label) {
           case 0:
-            super.onload.call(this);
+            upper.call(this);
             t = this.app;
             this.loadData();
             return [4, this.readThemes()];
@@ -80482,13 +80317,14 @@ class b1 extends e1 {
     localStorage.setItem("communityThemeSortOrder", this.sortOrder);
   }
   onOpen() {
+    const upper = super.onOpen;
     return __awaiter(this, undefined, Promise, function () {
       return __generator(this, function (t) {
         this.onlyShowUpdates
           ? (this.currentModeToggleSetting.settingEl.detach(), this.installedOnlyToggleSetting.settingEl.detach())
           : this.app.vault.getConfig("theme") === "system" &&
             (this.currentModeToggleSetting.settingEl.detach(), this.currentModeToggle.setValue(!1));
-        super.onOpen.call(this);
+        upper.call(this);
         return [2];
       });
     });
@@ -87638,11 +87474,12 @@ class u0 extends DJ {
     return Object.assign(t, this.backlink.getState());
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       return __generator(this, function (i) {
         switch (i.label) {
           case 0:
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             i.sent();
             return [4, this.backlink.setState(t)];
@@ -88710,11 +88547,12 @@ class MarkdownView extends TextFileView {
     this.onResize();
   }
   onClose() {
+    const upper = super.onClose;
     return __awaiter(this, undefined, undefined, function () {
       return __generator(this, function (t) {
         switch (t.label) {
           case 0:
-            return [4, super.onClose.call(this)];
+            return [4, upper.call(this)];
           case 1:
             t.sent();
             this.editMode.destroy();
@@ -88738,6 +88576,7 @@ class MarkdownView extends TextFileView {
     return t;
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i, r, showBacklinks, a, s, l, c;
       return __generator(this, function (u) {
@@ -88760,7 +88599,7 @@ class MarkdownView extends TextFileView {
               this.updateShowBacklinks(),
               showBacklinks && a && typeof a == "object" && this.backlinks.setState(a));
             i && (n.layout = true);
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 3:
             u.sent();
             return [2];
@@ -88801,6 +88640,7 @@ class MarkdownView extends TextFileView {
     t.hasOwnProperty("scroll") && (this.scroll = t.scroll);
   }
   onUnloadFile(t) {
+    const upper = super.onUnloadFile;
     return __awaiter(this, undefined, Promise, function () {
       return __generator(this, function (n) {
         this.onMarkdownFold();
@@ -88808,7 +88648,7 @@ class MarkdownView extends TextFileView {
         this.rawFrontmatter = null;
         this.metadataEditor.clear();
         this.editMode.setCssClass(null);
-        return [2, super.onUnloadFile.call(this, t)];
+        return [2, upper.call(this, t)];
       });
     });
   }
@@ -88952,12 +88792,13 @@ class MarkdownView extends TextFileView {
     }
   }
   onLoadFile(t) {
+    const upper = super.onLoadFile;
     return __awaiter(this, undefined, Promise, function () {
       return __generator(this, function (n) {
         switch (n.label) {
           case 0:
             this.inlineTitleEl.setText(this.getDisplayText());
-            return [4, super.onLoadFile.call(this, t)];
+            return [4, upper.call(this, t)];
           case 1:
             n.sent();
             this.updateBacklinks();
@@ -88967,12 +88808,13 @@ class MarkdownView extends TextFileView {
     });
   }
   onRename(t) {
+    const upper = super.onRename;
     return __awaiter(this, undefined, undefined, function () {
       return __generator(this, function (n) {
         switch (n.label) {
           case 0:
             t === this.file && this.inlineTitleEl.setText(t.basename);
-            return [4, super.onRename.call(this, t)];
+            return [4, upper.call(this, t)];
           case 1:
             n.sent();
             return [2];
@@ -91052,10 +90894,11 @@ class P0 extends View {
     return n;
   }
   onOpen() {
+    const upper = super.onOpen;
     return __awaiter(this, undefined, Promise, function () {
       return __generator(this, function (t) {
         this.registerDomEvent(this.leaf.tabHeaderEl, "click", this.onTabHeaderClick.bind(this));
-        return [2, super.onOpen.call(this)];
+        return [2, upper.call(this)];
       });
     });
   }
@@ -91092,12 +90935,13 @@ class P0 extends View {
     return t;
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i, r, o, a, s, l;
       return __generator(this, function (c) {
         switch (c.label) {
           case 0:
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             c.sent();
             i = t.query;
@@ -92974,12 +92818,13 @@ class h2 extends ItemView {
     return "globe-2";
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i;
       return __generator(this, function (r) {
         switch (r.label) {
           case 0:
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             r.sent();
             return t.url && this.url !== t.url
@@ -94960,6 +94805,7 @@ class F2 extends k_(O2) {
     this.tree.requestSaveFolds();
   }
   updateCollapsed(t) {
+    const upper = super.updateCollapsed;
     return __awaiter(this, undefined, Promise, function () {
       var n, i, r;
       return __generator(this, function (o) {
@@ -94968,7 +94814,7 @@ class F2 extends k_(O2) {
             n = this.tree.infinityScroll;
             this.collapsed || (r = (i = this.tree).handleCollapseAll) === null || undefined === r || r.call(i, !1);
             n.invalidate(this, !0);
-            return [4, super.updateCollapsed.call(this, t)];
+            return [4, upper.call(this, t)];
           case 1:
             o.sent();
             n.invalidate(this);
@@ -104093,11 +103939,12 @@ class F4 extends TextFileView {
     });
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       return __generator(this, function (i) {
         switch (i.label) {
           case 0:
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             i.sent();
             t.viewState && this.canvas.setState(t.viewState);
@@ -104159,27 +104006,13 @@ class F4 extends TextFileView {
   clear() {
     this.canvas.clear();
   }
-  onOpen() {
-    return __awaiter(this, undefined, Promise, function () {
-      return __generator(this, function (t) {
-        this.canvas.load();
-        return [2, super.onOpen.call(this)];
-      });
-    });
+  async onOpen() {
+    this.canvas.load();
+    return super.onOpen();
   }
-  onClose() {
-    return __awaiter(this, undefined, Promise, function () {
-      return __generator(this, function (t) {
-        switch (t.label) {
-          case 0:
-            return [4, super.onClose.call(this)];
-          case 1:
-            t.sent();
-            this.canvas.unload();
-            return [2];
-        }
-      });
-    });
+  async onClose() {
+    await super.onClose.call(this);
+    this.canvas.unload();
   }
   handleCut(e) {
     this.canvas.handleCut(e);
@@ -107324,6 +107157,7 @@ class T3 extends k_(E3) {
     }
   }
   setCollapsed(t, n) {
+    const upper = super.setCollapsed;
     return __awaiter(this, undefined, undefined, function () {
       var i, r, o, a;
       return __generator(this, function (s) {
@@ -107336,7 +107170,7 @@ class T3 extends k_(E3) {
                 (a = r.tree),
                 (o.style.minHeight = ""),
                 a.infinityScroll.invalidate(this, !0),
-                [4, super.setCollapsed.call(this, t, n)]);
+                [4, upper.call(this, t, n)]);
           case 1:
             s.sent();
             a.infinityScroll.invalidate(this, !0);
@@ -107448,6 +107282,7 @@ class P3 extends View {
     return t;
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i, r, o, a;
       return __generator(this, function (s) {
@@ -107458,7 +107293,7 @@ class P3 extends View {
         t.hasOwnProperty("newFile") &&
           String.isString(t.newFile) &&
           ((o = t.newFile), (a = this.app.vault.getAbstractFileByPath(o)) && this.afterCreate(a, !1));
-        return [2, super.setState.call(this, t, n)];
+        return [2, upper.call(this, t, n)];
       });
     });
   }
@@ -110396,12 +110231,13 @@ class s5 extends DJ {
     return t;
   }
   setState(t, n) {
+    const upper = super.setState;
     return __awaiter(this, undefined, Promise, function () {
       var i, r;
       return __generator(this, function (o) {
         switch (o.label) {
           case 0:
-            return [4, super.setState.call(this, t, n)];
+            return [4, upper.call(this, t, n)];
           case 1:
             o.sent();
             i = t.linksCollapsed;
@@ -111117,21 +110953,10 @@ class d5 extends C_ {
       (n = o.workspace.getLeaf()).openFile(a, { eState: eState });
     }
   }
-  updateCollapsed(t) {
-    return __awaiter(this, undefined, Promise, function () {
-      var n, i;
-      return __generator(this, function (r) {
-        switch (r.label) {
-          case 0:
-            this.collapsed || (i = (n = this.tree).handleCollapseAll) === null || undefined === i || i.call(n, !1);
-            return [4, super.updateCollapsed.call(this, t)];
-          case 1:
-            r.sent();
-            this.tree.infinityScroll.invalidate(this);
-            return [2];
-        }
-      });
-    });
+  async updateCollapsed(collapsed) {
+    this.collapsed || this.tree?.handleCollapseAll.call(this.tree, false);
+    await super.updateCollapsed.call(this, collapsed);
+    this.tree.infinityScroll.invalidate(this);
   }
 }
 class f5 {
@@ -111381,25 +111206,12 @@ class m5 extends DJ {
     t.searchQuery = this.searchComponent.getValue();
     return t;
   }
-  setState(t, n) {
-    return __awaiter(this, undefined, undefined, function () {
-      var i, r, o;
-      return __generator(this, function (a) {
-        switch (a.label) {
-          case 0:
-            return [4, super.setState.call(this, t, n)];
-          case 1:
-            a.sent();
-            i = t.followCursor;
-            r = t.searchQuery;
-            o = t.showSearch;
-            isBoolean(i) && this.setFollowCursor(i);
-            isBoolean(o) && this.setShowSearch(o);
-            String.isString(r) && (this.searchComponent.setValue(r), this.updateSearch());
-            return [2];
-        }
-      });
-    });
+  async setState(t, n) {
+    const { followCursor, searchQuery, showSearch } = t;
+    await super.setState.call(this, t, n);
+    isBoolean(followCursor) && this.setFollowCursor(followCursor);
+    isBoolean(showSearch) && this.setShowSearch(showSearch);
+    String.isString(searchQuery) && (this.searchComponent.setValue(searchQuery), this.updateSearch());
   }
   canAcceptExtension(e) {
     return !0;
@@ -112339,26 +112151,13 @@ class M5 extends ItemView {
     t.searchQuery = this.searchComponent.getValue();
     return t;
   }
-  setState(t, n) {
-    return __awaiter(this, undefined, Promise, function () {
-      var i, r, sortOrder;
-      return __generator(this, function (a) {
-        switch (a.label) {
-          case 0:
-            return [4, super.setState.call(this, t, n)];
-          case 1:
-            a.sent();
-            i = t.searchQuery;
-            r = t.showSearch;
-            sortOrder = t.sortOrder;
-            String.isString(sortOrder) && C5.hasOwnProperty(sortOrder) && (this.sortOrder = sortOrder);
-            isBoolean(r) && this.setShowSearch(r);
-            String.isString(i) && (this.searchComponent.setValue(i), this.updateSearch());
-            this.update();
-            return [2];
-        }
-      });
-    });
+  async setState(t, n) {
+    const { searchQuery, showSearch, sortOrder } = t;
+    await super.setState.call(this, t, n);
+    String.isString(sortOrder) && C5.hasOwnProperty(sortOrder) && (this.sortOrder = sortOrder);
+    isBoolean(showSearch) && this.setShowSearch(showSearch);
+    String.isString(searchQuery) && (this.searchComponent.setValue(searchQuery), this.updateSearch());
+    this.update();
   }
   setSortOrder(sortOrder) {
     this.sortOrder = sortOrder;
@@ -112496,41 +112295,18 @@ class x5 extends DJ {
       });
     });
   }
-  onLoadFile(modifyingFile) {
-    return __awaiter(this, undefined, undefined, function () {
-      var n;
-      return __generator(this, function (i) {
-        switch (i.label) {
-          case 0:
-            return [4, this.readSupportedFile(modifyingFile)];
-          case 1:
-            n = i.sent();
-            this.updateFrontmatter(modifyingFile, n);
-            this.isSupportedFile(modifyingFile) && (this.modifyingFile = modifyingFile);
-            return [4, super.onLoadFile.call(this, modifyingFile)];
-          case 2:
-            i.sent();
-            return [2];
-        }
-      });
-    });
+  async onLoadFile(modifyingFile) {
+    const content = await this.readSupportedFile(modifyingFile);
+    this.updateFrontmatter(modifyingFile, content);
+    this.isSupportedFile(modifyingFile) && (this.modifyingFile = modifyingFile);
+    await super.onLoadFile(modifyingFile);
   }
-  onUnloadFile(t) {
-    return __awaiter(this, undefined, Promise, function () {
-      return __generator(this, function (n) {
-        switch (n.label) {
-          case 0:
-            this.modifyingFile = null;
-            this.updateFrontmatter(null, "");
-            this.rawFrontmatter = null;
-            this.metadataEditor.clear();
-            return [4, super.onUnloadFile.call(this, t)];
-          case 1:
-            n.sent();
-            return [2];
-        }
-      });
-    });
+  async onUnloadFile(t) {
+    this.modifyingFile = null;
+    this.updateFrontmatter(null, "");
+    this.rawFrontmatter = null;
+    this.metadataEditor.clear();
+    await super.onUnloadFile(t);
   }
   onQuickPreview(e, t) {
     if (e === this.file) {
@@ -114018,6 +113794,7 @@ class K5 extends _5 {
     return n;
   }
   show() {
+    const upper = super.show;
     return __awaiter(this, undefined, undefined, function () {
       var t,
         n,
@@ -114256,7 +114033,7 @@ class K5 extends _5 {
                 x = M[S];
                 E(x);
               }
-            super.show.call(this);
+            upper.call(this);
             return [2];
         }
         var token;
@@ -114332,6 +114109,7 @@ class Y5 extends _5 {
     return t;
   }
   show() {
+    const upper = super.show;
     return __awaiter(this, undefined, undefined, function () {
       var t,
         n,
@@ -114689,7 +114467,7 @@ class Y5 extends _5 {
                 });
               });
             });
-            super.show.call(this);
+            upper.call(this);
             return [2];
         }
       });
@@ -114703,6 +114481,7 @@ class Z5 extends _5 {
     return t;
   }
   show() {
+    const upper = super.show;
     return __awaiter(this, undefined, undefined, function () {
       var t,
         n,
@@ -114773,7 +114552,7 @@ class Z5 extends _5 {
             });
           });
         });
-        super.show.call(this);
+        upper.call(this);
         return [2];
       });
     });
@@ -115307,6 +115086,7 @@ class t8 extends _5 {
     this.currentlyPublishedToSiteNameEl.setAttribute("href", d8 + "/" + e);
   }
   show() {
+    const upper = super.show;
     return __awaiter(this, undefined, undefined, function () {
       var t,
         n,
@@ -115390,7 +115170,7 @@ class t8 extends _5 {
             a.render();
             s.collapseAll();
             s.render();
-            return [2, super.show.call(this)];
+            return [2, upper.call(this)];
         }
       });
     });
@@ -115460,13 +115240,14 @@ class n8 extends _5 {
     this.changes = changes;
   }
   show() {
+    const upper = super.show;
     return __awaiter(this, undefined, undefined, function () {
       var t, n, i, r, o;
       return __generator(this, function (a) {
         switch (a.label) {
           case 0:
             this.runnable && this.runnable.cancel();
-            return [4, super.show.call(this)];
+            return [4, upper.call(this)];
           case 1:
             for (
               a.sent(),
@@ -115826,15 +115607,10 @@ class o8 extends _5 {
     });
     return n;
   }
-  show() {
-    return __awaiter(this, undefined, undefined, function () {
-      return __generator(this, function (t) {
-        this.passwordFieldEl.value = "";
-        this.nicknameFieldEl.value = "";
-        super.show.call(this);
-        return [2];
-      });
-    });
+  async show() {
+    this.passwordFieldEl.value = "";
+    this.nicknameFieldEl.value = "";
+    super.show();
   }
 }
 class a8 extends _5 {
@@ -115844,6 +115620,7 @@ class a8 extends _5 {
     return t;
   }
   show() {
+    const upper = super.show;
     return __awaiter(this, undefined, undefined, function () {
       var t,
         n,
@@ -115855,7 +115632,7 @@ class a8 extends _5 {
         switch (s.label) {
           case 0:
             (t = this.el).empty();
-            return [4, super.show.call(this)];
+            return [4, upper.call(this)];
           case 1:
             s.sent();
             return [4, this.parentModal.plugin.apiCustomUrl()];
@@ -120366,20 +120143,10 @@ class Q8 extends k_(X8) {
   setFlair(count) {
     this.flairEl.setText(i18nProxy.nouns.count({ count: count }));
   }
-  setCollapsed(t, n) {
-    return __awaiter(this, undefined, Promise, function () {
-      return __generator(this, function (i) {
-        switch (i.label) {
-          case 0:
-            return [4, super.setCollapsed.call(this, t, n)];
-          case 1:
-            i.sent();
-            this.tree.infinityScroll.invalidate(this);
-            this.tree.requestSaveFolds();
-            return [2];
-        }
-      });
-    });
+  async setCollapsed(t, n) {
+    await super.setCollapsed.call(this, t, n);
+    this.tree.infinityScroll.invalidate(this);
+    this.tree.requestSaveFolds();
   }
 }
 class $8 extends X8 {
@@ -123259,21 +123026,10 @@ class b7 extends C_ {
     super.onCollapseClick.call(this, t);
     this.tree.requestSaveFolds();
   }
-  updateCollapsed(t) {
-    return __awaiter(this, undefined, Promise, function () {
-      var n, i;
-      return __generator(this, function (r) {
-        switch (r.label) {
-          case 0:
-            return [4, super.updateCollapsed.call(this, t)];
-          case 1:
-            r.sent();
-            this.collapsed || (i = (n = this.tree).handleCollapseAll) === null || undefined === i || i.call(n, !1);
-            this.tree.infinityScroll.invalidate(this);
-            return [2];
-        }
-      });
-    });
+  async updateCollapsed(collapsed) {
+    await super.updateCollapsed.call(this, collapsed);
+    this.collapsed || this.tree?.handleCollapseAll?.call(this.tree, false);
+    this.tree.infinityScroll.invalidate(this);
   }
 }
 class w7 extends z0 {
@@ -123400,28 +123156,14 @@ class k7 extends View {
     t.searchQuery = this.searchComponent.getValue();
     return t;
   }
-  setState(t, n) {
-    return __awaiter(this, undefined, Promise, function () {
-      var sortOrder, r, o, a;
-      return __generator(this, function (s) {
-        switch (s.label) {
-          case 0:
-            return [4, super.setState.call(this, t, n)];
-          case 1:
-            s.sent();
-            sortOrder = t.sortOrder;
-            r = t.useHierarchy;
-            o = t.showSearch;
-            a = t.searchQuery;
-            String.isString(sortOrder) && y7.hasOwnProperty(sortOrder) && (this.sortOrder = sortOrder);
-            isBoolean(r) && this.setUseHierarchy(r);
-            isBoolean(o) && this.setShowSearch(o);
-            String.isString(a) && (this.searchComponent.setValue(a), this.updateSearch());
-            this.requestUpdateTags();
-            return [2];
-        }
-      });
-    });
+  async setState(t, n) {
+    const { sortOrder, useHierarchy, showSearch, searchQuery } = t;
+    await super.setState.call(this, t, n);
+    String.isString(sortOrder) && y7.hasOwnProperty(sortOrder) && (this.sortOrder = sortOrder);
+    isBoolean(useHierarchy) && this.setUseHierarchy(useHierarchy);
+    isBoolean(showSearch) && this.setShowSearch(showSearch);
+    String.isString(searchQuery) && (this.searchComponent.setValue(searchQuery), this.updateSearch());
+    this.requestUpdateTags();
   }
   onload() {
     this.registerEvent(this.app.metadataCache.on("finished", this.requestUpdateTags, this));
