@@ -1,1 +1,15 @@
-.prettierrc
+```
+# Build outputs
+src/obsidian/modules/output/
+
+# Dependencies
+node_modules/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Editors
+.vscode/
+.idea/
+```
